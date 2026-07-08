@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Roda da Sorte & Avaliações</title>
+  <link rel="manifest" href="./manifest.json?v=12" />
+  <meta name="theme-color" content="#facc15" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Roda Sorte" />
+  <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png" />
+  <link rel="apple-touch-icon" href="./icon-192.png" />
+  <link rel="stylesheet" href="style.css?v=12" />
+</head>
+<body>
+  <header class="topo">
+    <button id="btnAbrirAdmin" class="admin-topo">ADM</button>
+    <h1>🎁 Roda da Sorte</h1>
+    <p>Gire a roda, ganhe sua porcentagem de desconto e deixe sua avaliação.</p>
+    <p class="id-box">ID pelo telefone: <strong id="visitanteId">Digite seu telefone</strong></p>
+  </header>
+
+  <main class="container">
+    <section class="card sorteio">
+      <div class="views-publicas">👁️ Total de visitas no site: <strong id="totalVisitasSite">0</strong><br><span>Visitas nesta promoção: <strong id="totalVisitasPromocao">0</strong></span></div>
+      <h2>Gire para ganhar desconto</h2>
+      <div class="wheel-wrap">
+        <div class="seta">▼</div>
+        <canvas id="wheel" width="320" height="320"></canvas>
+      </div>
+      <button id="btnGirar" class="btn principal">GIRAR RODA</button>
+      <div id="resultado" class="resultado">Seu prêmio aparecerá aqui.</div>
+    </section>
+
+    <section class="card avaliacao">
+      <h2>⭐ Avalie sua roupa/atendimento</h2>
+
+      <form id="formAvaliacao">
+        <label>Nome e sobrenome *</label>
+        <input type="text" id="nome" placeholder="Ex: Maria Silva" required />
+
+        <label>Telefone *</label>
+        <input type="tel" id="telefone" placeholder="Ex: 34998607006" required />
+
+        <label>Categoria *</label>
+        <select id="categoria" required>
+          <option value="">Selecione</option>
+          <option value="Excelente">Excelente</option>
+          <option value="Ótimo">Ótimo</option>
+          <option value="Bom">Bom</option>
+          <option value="Baixo">Baixo</option>
+          <option value="Ruim">Ruim</option>
+        </select>
+
+        <label>Estrelas *</label>
+        <div class="estrelas" id="estrelas">
+          <span data-star="1">★</span>
+          <span data-star="2">★</span>
+          <span data-star="3">★</span>
+          <span data-star="4">★</span>
+          <span data-star="5">★</span>
+        </div>
+        <input type="hidden" id="nota" required />
+
+        <label>Comentário *</label>
+        <textarea id="comentario" rows="5" placeholder="Escreva o que achou da roupa ou do atendimento..." required></textarea>
+
+        <button type="submit" id="btnEnviarAvaliacao" class="btn principal hidden" disabled>ENVIAR AVALIAÇÃO</button>
+      </form>
+      <p id="status" class="status"></p>
+    </section>
+
+    <section class="card lista lista-minha">
+      <h2>Seu comentário</h2>
+      <p class="sub-lista">Quando você enviar sua avaliação, ela aparecerá aqui para você visualizar sempre que entrar novamente.</p>
+      <div id="meuComentarioLista" class="comentariosLista">
+        <p class="vazio">Digite seu telefone para localizar seu comentário.</p>
+      </div>
+    </section>
+
+    <section class="card lista lista-publica">
+      <h2>Comentários dos clientes</h2>
+      <p class="sub-lista">Aqui aparece a avaliação pública: nome, estrelas, categoria e comentário.</p>
+      <div id="comentariosLista" class="comentariosLista">
+        <p class="vazio">Nenhum comentário ainda.</p>
+      </div>
+    </section>
+  </main>
+
+  <div id="adminModal" class="modal hidden">
+    <div class="modal-card">
+      <button id="btnFecharAdmin" class="fechar">×</button>
+      <h2>🔐 Painel ADM</h2>
+      <p class="admin-info">Entre com o e-mail e senha cadastrados no Firebase Authentication.</p>
+
+      <div id="adminLogin">
+        <label>E-mail ADM</label>
+        <input type="email" id="loginAdmin" placeholder="Ex: admin@passadoria.com" autocomplete="username" />
+        <label>Senha ADM</label>
+        <input type="password" id="senhaAdmin" placeholder="Digite sua senha" autocomplete="current-password" />
+        <button id="btnEntrarAdmin" class="btn principal">ENTRAR NO ADM</button>
+        <button id="btnRecuperarSenha" class="btn secundario" type="button">RECUPERAR SENHA</button>
+        <p id="adminErro" class="erro-admin"></p>
+      </div>
+
+      <div id="adminPainel" class="hidden">
+        <p>ADM conectado: <strong id="adminUsuarioLogado"></strong></p>
+        <p>Promoção atual: <strong id="promoAtualTexto">carregando...</strong></p>
+        <p>Total de giros nesta promoção: <strong id="totalGirosTexto">0</strong></p>
+        <p>Total de avaliações salvas: <strong id="totalAvaliacoesTexto">0</strong></p>
+        <p>Total de visualizações do site: <strong id="totalVisualizacoesTexto">0</strong></p>
+
+        <button id="btnNovaPromocao" class="btn principal">NOVA PROMOÇÃO</button>
+        <button id="btnLimparPromocao" class="btn perigo">LIMPAR GIROS DA PROMOÇÃO ATUAL</button>
+        <button id="btnVerAvaliacoes" class="btn secundario">VER AVALIAÇÕES</button>
+        <button id="btnVerGiros" class="btn secundario">VER LISTA DE GIROS</button>
+        <button id="btnVerNotificacoes" class="btn secundario">🔔 VER NOTIFICAÇÕES</button>
+        <button id="btnExportarPDF" class="btn secundario">COMPARTILHAR WHATSAPP</button>
+        <button id="btnExcluirComentarios" class="btn perigo">EXCLUIR COMENTÁRIOS</button>
+        <button id="btnSairAdmin" class="btn perigo">SAIR DO ADM</button>
+
+        <p class="aviso-admin">Nova promoção libera todos os usuários para girar novamente e mantém o histórico antigo salvo.</p>
+        <div id="adminNotificacoes" class="admin-lista hidden"></div>
+        <div id="adminGiros" class="admin-lista hidden"></div>
+        <div id="adminAvaliacoes" class="admin-lista hidden"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="app.js?v=12"></script>
+</body>
+</html>

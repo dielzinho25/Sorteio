@@ -1,0 +1,1346 @@
+// ================= FIREBASE =================
+// Cole aqui as configurações do seu Firebase Web App.
+const firebaseConfig = {
+  apiKey: "AIzaSyDrtZxbKXk7hjlqBL_BLoZMTBdc5iqBCXo",
+  authDomain: "ferramentas-projeto.firebaseapp.com",
+  databaseURL: "https://ferramentas-projeto.firebaseio.com",
+  projectId: "ferramentas-projeto",
+  storageBucket: "ferramentas-projeto.appspot.com",
+  messagingSenderId: "877191590019",
+  appId: "1:877191590019:web:152d4d35bdd3024c53abb6"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+const auth = firebase.auth();
+
+// ================= CONFIGURAÇÃO =================
+const LOGIN_ADMIN = "admin";
+const SENHA_ADMIN = "870@Passadoria";
+let promocaoAtual = "";
+let jaGirou = false;
+let premioAtual = "";
+let telefoneAtual = "";
+let usuarioIdAtual = "";        // ID protegido para mostrar na tela
+let usuarioKeyAtual = "";       // chave segura/hash para salvar no Firebase
+let avaliacaoJaEnviada = false;
+
+const visitanteIdEl = document.getElementById("visitanteId");
+if (visitanteIdEl) visitanteIdEl.textContent = "Digite seu telefone para gerar o ID";
+
+function limparTelefone(telefone) {
+  return String(telefone || "").replace(/\D/g, "");
+}
+
+function mascararTelefone(telefone) {
+  const limpo = limparTelefone(telefone);
+  if (!limpo) return "";
+  const ultimos = limpo.slice(-4);
+  return "••••••" + ultimos;
+}
+
+function gerarUsuarioIdProtegido(telefone) {
+  const limpo = limparTelefone(telefone);
+  if (!limpo) return "";
+  return "TEL-" + mascararTelefone(limpo);
+}
+
+async function gerarChaveTelefone(telefone) {
+  const limpo = limparTelefone(telefone);
+  const encoder = new TextEncoder();
+  const data = encoder.encode(limpo);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return "tel_" + hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function telefoneValido(telefone) {
+  return limparTelefone(telefone).length >= 10;
+}
+
+function atualizarUsuarioAtual() {
+  const telefoneInput = document.getElementById("telefone");
+  telefoneAtual = telefoneInput ? telefoneInput.value.trim() : "";
+  usuarioIdAtual = gerarUsuarioIdProtegido(telefoneAtual);
+  if (visitanteIdEl) visitanteIdEl.textContent = usuarioIdAtual || "Digite seu telefone para gerar o ID";
+  return usuarioIdAtual;
+}
+
+function desbloquearFormulario() {
+  const ids = ["nome", "telefone", "categoria", "comentario"];
+  ids.forEach((id) => { const el = document.getElementById(id); if (el) el.disabled = false; });
+  estrelas.forEach((s) => { s.style.pointerEvents = "auto"; });
+}
+
+
+function preencherDadosSalvos(dados) {
+  if (!dados) return;
+  const nomeEl = document.getElementById("nome");
+  const telEl = document.getElementById("telefone");
+  const catEl = document.getElementById("categoria");
+  const comEl = document.getElementById("comentario");
+  const notaEl = document.getElementById("nota");
+
+  if (nomeEl && dados.nome) nomeEl.value = dados.nome;
+  if (telEl && dados.telefoneOriginal) telEl.value = dados.telefoneOriginal;
+  if (catEl && dados.categoria) catEl.value = dados.categoria;
+  if (comEl && dados.comentario) comEl.value = dados.comentario;
+  if (notaEl && dados.nota) notaEl.value = dados.nota;
+
+  const n = Number(dados.nota || 0);
+  estrelas.forEach((st) => st.classList.toggle("ativa", Number(st.dataset.star) <= n));
+}
+
+function bloquearFormularioParaVisualizacao(mensagem) {
+  const ids = ["nome", "telefone", "categoria", "comentario"];
+  ids.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = true;
+  });
+  estrelas.forEach((s) => { s.style.pointerEvents = "none"; });
+  if (btnGirar) {
+    btnGirar.disabled = true;
+    btnGirar.textContent = "BLOQUEADO";
+  }
+  if (btnEnviarAvaliacao) {
+    btnEnviarAvaliacao.disabled = true;
+    btnEnviarAvaliacao.classList.add("hidden");
+  }
+  if (statusEl) statusEl.textContent = mensagem || "Você já participou desta promoção. Agora é somente visualização.";
+}
+
+async function limparConfiguracaoDuplicada() {
+  // Remove a pasta antiga inteira. O projeto agora usa SOMENTE config/promocaoAtual.
+  try {
+    await db.ref("configuracoes").remove();
+  } catch (error) {
+    console.warn("Não foi possível apagar configuracoes antigas:", error);
+  }
+}
+
+async function carregarPromocaoAtual() {
+  // Caminho ÚNICO oficial da promoção atual: config/promocaoAtual.
+  try {
+    await limparConfiguracaoDuplicada();
+
+    const [snapConfig, snapPromos] = await Promise.all([
+      db.ref("config/promocaoAtual").once("value"),
+      db.ref("promocoes").once("value")
+    ]);
+
+    let atual = snapConfig.exists() ? String(snapConfig.val() || "").trim() : "";
+
+    // Se /config estiver vazio ou com promo_1, pega a última promoção real criada em /promocoes.
+    if (!atual || atual === "promo_1" || atual === "carregando...") {
+      const promos = [];
+      if (snapPromos.exists()) {
+        snapPromos.forEach((child) => {
+          if (child.key && child.key !== "promo_1") promos.push(child.key);
+        });
+      }
+      promos.sort();
+      if (promos.length) atual = promos[promos.length - 1];
+    }
+
+    // Primeira instalação: cria uma promoção real.
+    if (!atual || atual === "promo_1" || atual === "carregando...") {
+      atual = "promo_" + Date.now();
+      await db.ref("promocoes/" + atual).set({
+        criadaEm: new Date().toLocaleString("pt-BR"),
+        timestamp: Date.now(),
+        ativa: true
+      });
+    }
+
+    promocaoAtual = atual;
+    await db.ref("config/promocaoAtual").set(promocaoAtual);
+    if (promoAtualTexto) promoAtualTexto.textContent = promocaoAtual;
+    await atualizarContadoresVisitasPublicos();
+    return promocaoAtual;
+  } catch (error) {
+    console.error("Erro ao carregar promoção atual:", error);
+    const snap = await db.ref("config/promocaoAtual").once("value").catch(() => null);
+    const atual = snap && snap.exists() ? String(snap.val() || "").trim() : "";
+    promocaoAtual = atual && atual !== "promo_1" ? atual : ("promo_" + Date.now());
+    try { await db.ref("config/promocaoAtual").set(promocaoAtual); } catch(e) {}
+    if (promoAtualTexto) promoAtualTexto.textContent = promocaoAtual;
+    return promocaoAtual;
+  }
+}
+
+async function registrarEntrada() {
+  try {
+    await db.ref("entradas").push({
+      data: new Date().toLocaleString("pt-BR"),
+      timestamp: Date.now(),
+      pagina: location.href,
+      promocaoAtual,
+      navegador: navigator.userAgent || ""
+    });
+  } catch (error) {
+    console.error("Erro ao registrar entrada:", error);
+  }
+}
+
+async function atualizarContadoresVisitasPublicos() {
+  const totalSiteEl = document.getElementById("totalVisitasSite");
+  const totalPromoEl = document.getElementById("totalVisitasPromocao");
+  try {
+    const snapTotal = await db.ref("entradas").once("value");
+    if (totalSiteEl) totalSiteEl.textContent = snapTotal.exists() ? snapTotal.numChildren() : 0;
+
+    const snapPromo = await db.ref("entradas").orderByChild("promocaoAtual").equalTo(promocaoAtual || "").once("value");
+    if (totalPromoEl) totalPromoEl.textContent = snapPromo.exists() ? snapPromo.numChildren() : 0;
+
+    const totalAdminEl = document.getElementById("totalVisualizacoesTexto");
+    if (totalAdminEl) totalAdminEl.textContent = snapTotal.exists() ? snapTotal.numChildren() : 0;
+  } catch (error) {
+    console.error("Erro ao atualizar visualizações:", error);
+  }
+}
+
+// ================= RODA DA SORTE =================
+const canvas = document.getElementById("wheel");
+const ctx = canvas.getContext("2d");
+const btnGirar = document.getElementById("btnGirar");
+const resultado = document.getElementById("resultado");
+
+// Porcentagens distribuídas somente de 0% até 20%.
+const premios = ["0%", "2%", "4%", "6%", "8%", "10%", "12%", "14%", "16%", "18%", "20%"]; 
+const cores = ["#facc15", "#22c55e", "#3b82f6", "#ef4444", "#a855f7", "#fb923c", "#14b8a6", "#ec4899", "#84cc16", "#f97316", "#38bdf8"];
+let anguloAtual = 0;
+let girando = false;
+
+function desenharRoda() {
+  const centro = canvas.width / 2;
+  const raio = centro - 5;
+  const fatia = (2 * Math.PI) / premios.length;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  for (let i = 0; i < premios.length; i++) {
+    const inicio = anguloAtual + i * fatia;
+    const fim = inicio + fatia;
+    ctx.beginPath();
+    ctx.moveTo(centro, centro);
+    ctx.arc(centro, centro, raio, inicio, fim);
+    ctx.closePath();
+    ctx.fillStyle = cores[i];
+    ctx.fill();
+
+    ctx.save();
+    ctx.translate(centro, centro);
+    ctx.rotate(inicio + fatia / 2);
+    ctx.textAlign = "right";
+    ctx.fillStyle = "#111827";
+    ctx.font = "bold 18px Arial";
+    ctx.fillText(premios[i], raio - 22, 7);
+    ctx.restore();
+  }
+
+  ctx.beginPath();
+  ctx.arc(centro, centro, 35, 0, 2 * Math.PI);
+  ctx.fillStyle = "#111827";
+  ctx.fill();
+  ctx.fillStyle = "#facc15";
+  ctx.font = "bold 14px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText("SORTE", centro, centro + 5);
+}
+
+desenharRoda();
+
+async function verificarSeJaGirou() {
+  atualizarUsuarioAtual();
+  if (!telefoneValido(telefoneAtual)) {
+    jaGirou = false;
+    avaliacaoJaEnviada = false;
+    premioAtual = "";
+    resultado.textContent = "Digite seu telefone antes de girar.";
+    desbloquearFormulario();
+    btnGirar.disabled = false;
+    btnGirar.textContent = "GIRAR RODA";
+    atualizarBotaoEnviar();
+    return false;
+  }
+
+  usuarioKeyAtual = await gerarChaveTelefone(telefoneAtual);
+
+  // Primeiro olha o bloqueio final. Esse é o registro principal no Firebase.
+  const snapParticipante = await db.ref(`participantesPorTelefone/${promocaoAtual}/${usuarioKeyAtual}`).once("value");
+  if (snapParticipante.exists()) {
+    const dados = snapParticipante.val();
+    jaGirou = true;
+    avaliacaoJaEnviada = true;
+    premioAtual = dados.descontoSorteado || "";
+    preencherDadosSalvos(dados);
+    carregarMeuComentario();
+    resultado.textContent = `Você já participou desta promoção. Desconto: ${premioAtual}`;
+    bloquearFormularioParaVisualizacao("✅ Você já avaliou e já usou seu giro. Agora é somente visualização.");
+    return true;
+  }
+
+  const snapAvaliacao = await db.ref(`avaliacoesPorTelefone/${promocaoAtual}/${usuarioKeyAtual}`).once("value");
+  avaliacaoJaEnviada = snapAvaliacao.exists();
+
+  const snapGiro = await db.ref(`girosPorTelefone/${promocaoAtual}/${usuarioKeyAtual}`).once("value");
+  jaGirou = snapGiro.exists();
+
+  if (avaliacaoJaEnviada) {
+    const dados = snapAvaliacao.val();
+    premioAtual = dados.descontoSorteado || "";
+    preencherDadosSalvos(dados);
+    carregarMeuComentario();
+    await db.ref(`participantesPorTelefone/${promocaoAtual}/${usuarioKeyAtual}`).set({ ...dados, bloqueado: true });
+    resultado.textContent = `Você já participou desta promoção. Desconto: ${premioAtual}`;
+    bloquearFormularioParaVisualizacao("✅ Sua avaliação já foi enviada. Você só pode visualizar.");
+    return true;
+  }
+
+  if (jaGirou) {
+    const dados = snapGiro.val();
+    premioAtual = dados.descontoSorteado || "";
+    preencherDadosSalvos(dados);
+    carregarMeuComentario();
+    resultado.textContent = `Você já utilizou seu giro. Desconto: ${premioAtual}`;
+    btnGirar.disabled = true;
+    btnGirar.textContent = "GIRO JÁ UTILIZADO";
+  } else {
+    desbloquearFormulario();
+    resultado.textContent = "Seu prêmio aparecerá aqui.";
+    btnGirar.disabled = false;
+    btnGirar.textContent = "GIRAR RODA";
+  }
+  atualizarBotaoEnviar();
+  return jaGirou || avaliacaoJaEnviada;
+}
+
+
+const telefoneInput = document.getElementById("telefone");
+if (telefoneInput) {
+  telefoneInput.addEventListener("blur", async () => { await verificarSeJaGirou(); await carregarMeuComentario(); });
+  telefoneInput.addEventListener("input", () => { atualizarUsuarioAtual(); atualizarBotaoEnviar(); });
+}
+
+btnGirar.addEventListener("click", async () => {
+  if (girando) return;
+
+  atualizarUsuarioAtual();
+  const nome = document.getElementById("nome").value.trim();
+  if (!nomeCompletoValido(nome)) return alert("Digite seu nome e sobrenome antes de girar.");
+  if (!telefoneValido(telefoneAtual)) return alert("Digite um telefone válido com DDD antes de girar.");
+
+  await verificarSeJaGirou();
+  if (jaGirou) {
+    alert("Você já utilizou seu giro de desconto.");
+    return;
+  }
+
+  girando = true;
+  btnGirar.disabled = true;
+  resultado.textContent = "Girando...";
+
+  const voltas = 6 + Math.random() * 4;
+  const destino = Math.random() * 2 * Math.PI;
+  const total = voltas * 2 * Math.PI + destino;
+  const inicio = anguloAtual;
+  const duracao = 4200;
+  const start = performance.now();
+
+  function animar(tempo) {
+    const progresso = Math.min((tempo - start) / duracao, 1);
+    const ease = 1 - Math.pow(1 - progresso, 4);
+    anguloAtual = inicio + total * ease;
+    desenharRoda();
+
+    if (progresso < 1) {
+      requestAnimationFrame(animar);
+    } else {
+      const anguloFinal = (anguloAtual % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+      const fatia = (2 * Math.PI) / premios.length;
+      const ponteiro = (1.5 * Math.PI - anguloFinal + 2 * Math.PI) % (2 * Math.PI);
+      const indice = Math.floor(ponteiro / fatia) % premios.length;
+      premioAtual = premios[indice];
+
+      const telefoneProtegido = mascararTelefone(telefoneAtual);
+      const dadosGiro = {
+        usuarioKey: usuarioKeyAtual,
+        usuarioId: usuarioIdAtual,
+        nome,
+        telefone: telefoneProtegido,
+        telefoneOriginal: limparTelefone(telefoneAtual),
+        promocaoId: promocaoAtual,
+        descontoSorteado: premioAtual,
+        data: new Date().toLocaleString("pt-BR"),
+        timestamp: Date.now()
+      };
+
+      // Salva no Firebase pelo telefone. Não usa localStorage.
+      db.ref(`girosPorTelefone/${promocaoAtual}/${usuarioKeyAtual}`).set(dadosGiro)
+        .then(() => db.ref("giros").push(dadosGiro))
+        .then(() => db.ref("notificacoesAdm").push({
+          tipo: "giro",
+          titulo: "Novo giro realizado",
+          nome,
+          telefone: telefoneProtegido,
+          telefoneOriginal: limparTelefone(telefoneAtual),
+          usuarioId: usuarioIdAtual,
+          descontoSorteado: premioAtual,
+          promocaoId: promocaoAtual,
+          data: new Date().toLocaleString("pt-BR"),
+          timestamp: Date.now(),
+          lida: false
+        }))
+        .then(() => {
+          girando = false;
+          jaGirou = true;
+          resultado.textContent = `🎉 Você ganhou ${premioAtual} de desconto!`;
+          btnGirar.textContent = "GIRO JÁ UTILIZADO";
+          btnGirar.disabled = true;
+          atualizarBotaoEnviar();
+          // Se todos os dados já estiverem preenchidos, envia a avaliação automaticamente após o giro.
+          setTimeout(() => {
+            if (formularioCompletoValido() && form && !avaliacaoJaEnviada) {
+              if (form.requestSubmit) form.requestSubmit();
+              else form.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+            }
+          }, 300);
+        })
+        .catch((error) => {
+          console.error("Erro ao salvar giro:", error);
+          girando = false;
+          btnGirar.disabled = false;
+          resultado.textContent = "❌ Erro ao salvar o giro. Confira as regras do Firebase.";
+          atualizarBotaoEnviar();
+        });
+    }
+  }
+
+  requestAnimationFrame(animar);
+});
+
+// ================= AVALIAÇÃO =================
+const estrelas = document.querySelectorAll("#estrelas span");
+const notaInput = document.getElementById("nota");
+
+estrelas.forEach((estrela) => {
+  estrela.addEventListener("click", () => {
+    const nota = Number(estrela.dataset.star);
+    notaInput.value = nota;
+    estrelas.forEach((s) => s.classList.toggle("ativa", Number(s.dataset.star) <= nota));
+    atualizarBotaoEnviar();
+  });
+});
+
+function nomeCompletoValido(nome) {
+  return String(nome || "").trim().split(/\s+/).length >= 2;
+}
+
+const form = document.getElementById("formAvaliacao");
+const statusEl = document.getElementById("status");
+const btnEnviarAvaliacao = document.getElementById("btnEnviarAvaliacao");
+const camposObrigatorios = ["nome", "telefone", "categoria", "comentario"].map((id) => document.getElementById(id));
+
+function formularioCompletoValido() {
+  const nome = document.getElementById("nome").value.trim();
+  const telefone = document.getElementById("telefone").value.trim();
+  const categoria = document.getElementById("categoria").value;
+  const nota = Number(notaInput.value);
+  const comentario = document.getElementById("comentario").value.trim();
+
+  return nomeCompletoValido(nome) && telefoneValido(telefone) && !!categoria && !!nota && !!comentario && !!premioAtual && jaGirou && !avaliacaoJaEnviada;
+}
+
+function atualizarBotaoEnviar() {
+  if (!btnEnviarAvaliacao) return;
+  const liberar = formularioCompletoValido();
+  btnEnviarAvaliacao.disabled = !liberar;
+  btnEnviarAvaliacao.classList.toggle("hidden", !liberar);
+
+  if (statusEl && !liberar && !statusEl.textContent.startsWith("✅")) {
+    statusEl.textContent = "Preencha todos os dados, escolha as estrelas e gire a roda para liberar o envio.";
+  }
+}
+
+
+camposObrigatorios.forEach((campo) => {
+  if (campo) campo.addEventListener("input", atualizarBotaoEnviar);
+  if (campo) campo.addEventListener("change", atualizarBotaoEnviar);
+});
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const nome = document.getElementById("nome").value.trim();
+  const telefone = document.getElementById("telefone").value.trim();
+  const categoria = document.getElementById("categoria").value;
+  const nota = Number(notaInput.value);
+  const comentario = document.getElementById("comentario").value.trim();
+  const usuarioId = gerarUsuarioIdProtegido(telefone);
+  const usuarioKey = await gerarChaveTelefone(telefone);
+  const telefoneProtegido = mascararTelefone(telefone);
+
+  if (!nomeCompletoValido(nome)) return alert("Digite nome e sobrenome.");
+  if (!telefoneValido(telefone)) return alert("Digite um telefone válido com DDD.");
+  if (!categoria || !nota || !comentario) return alert("Preencha todos os campos.");
+  if (!jaGirou || !premioAtual) return alert("Gire a roda primeiro para liberar o envio da avaliação.");
+
+  const snapAvaliacaoExistente = await db.ref(`avaliacoesPorTelefone/${promocaoAtual}/${usuarioKey}`).once("value");
+  if (snapAvaliacaoExistente.exists()) {
+    avaliacaoJaEnviada = true;
+    bloquearFormularioParaVisualizacao("✅ Você já enviou sua avaliação nesta promoção. Agora é somente visualização.");
+    return;
+  }
+
+  const snapGiro = await db.ref(`girosPorTelefone/${promocaoAtual}/${usuarioKey}`).once("value");
+  const dadosGiro = snapGiro.exists() ? snapGiro.val() : null;
+
+  const dados = {
+    usuarioKey,
+    usuarioId,
+    promocaoId: promocaoAtual,
+    nome,
+    telefone: telefoneProtegido,
+    telefoneOriginal: limparTelefone(telefone),
+    categoria,
+    nota,
+    comentario,
+    descontoSorteado: dadosGiro ? dadosGiro.descontoSorteado : "Não girou a roda",
+    data: new Date().toLocaleString("pt-BR"),
+    timestamp: Date.now()
+  };
+
+  try {
+    const novaRef = await db.ref("avaliacoes").push(dados);
+    await db.ref(`avaliacoesPorTelefone/${promocaoAtual}/${usuarioKey}`).set({ ...dados, avaliacaoId: novaRef.key });
+    await db.ref(`participantesPorTelefone/${promocaoAtual}/${usuarioKey}`).set({ ...dados, avaliacaoId: novaRef.key, bloqueado: true });
+    await db.ref("notificacoesAdm").push({
+      tipo: "avaliacao",
+      titulo: "Nova avaliação enviada",
+      nome,
+      telefone: telefoneProtegido,
+      telefoneOriginal: limparTelefone(telefone),
+      usuarioId,
+      categoria,
+      nota,
+      comentario,
+      descontoSorteado: dados.descontoSorteado,
+      promocaoId: promocaoAtual,
+      data: new Date().toLocaleString("pt-BR"),
+      timestamp: Date.now(),
+      lida: false
+    });
+    avaliacaoJaEnviada = true;
+    statusEl.textContent = "✅ Avaliação enviada e salva com sucesso no Firebase!";
+    await carregarMeuComentario();
+    await carregarTodosComentariosPublicos();
+    bloquearFormularioParaVisualizacao("✅ Sua avaliação foi enviada. Você só pode visualizar.");
+    atualizarBotaoEnviar();
+  } catch (error) {
+    console.error(error);
+    statusEl.textContent = "❌ Erro ao salvar. Confira as regras do Firebase Realtime Database.";
+  }
+});
+
+// ================= LISTAS DE COMENTÁRIOS DO FIREBASE =================
+const meuComentarioLista = document.getElementById("meuComentarioLista");
+const comentariosLista = document.getElementById("comentariosLista");
+
+function cardMeuComentario(item) {
+  return `
+    <div class="comentario-card meu-card">
+      <h3>${escapeHtml(item.nome || "Seu comentário")}</h3>
+      <p class="estrelas-salvas">${renderizarEstrelas(item.nota)}</p>
+      <p>Categoria: <strong>${escapeHtml(item.categoria || "")}</strong></p>
+      <p>Desconto: <strong>${escapeHtml(item.descontoSorteado || "")}</strong></p>
+      <p>💬 ${escapeHtml(item.comentario || "")}</p>
+      <small>${escapeHtml(item.data || "")}</small>
+    </div>
+  `;
+}
+
+function cardComentarioPublico(item, avaliacaoKey) {
+  const keyRaw = String(avaliacaoKey || montarChaveUnicaAvaliacao(item));
+  const keyAttr = escapeHtml(keyRaw);
+  const idSafe = respostaDomId(keyRaw);
+  return `
+    <div class="comentario-card publico-card" data-avaliacao-key="${keyAttr}">
+      <h3>👤 ${escapeHtml(item.nome || "Cliente")}</h3>
+      <p class="estrelas-salvas">${renderizarEstrelas(item.nota)}</p>
+      <p>Categoria: <strong>${escapeHtml(item.categoria || "")}</strong></p>
+      <p>💬 ${escapeHtml(item.comentario || "")}</p>
+
+      <div class="respostas-area">
+        <h4 class="titulo-respostas">💬 Comentários dessa avaliação</h4>
+        <div class="respostas-lista" id="respostas-${idSafe}">
+          <p class="vazio pequeno">Carregando comentários...</p>
+        </div>
+        <button type="button" class="btn-toggle-respostas" data-key="${keyAttr}">➕ Comentar nessa avaliação</button>
+        <div class="responder-box hidden" id="responder-${idSafe}">
+          <input type="text" class="resposta-nome" placeholder="Seu nome" maxlength="60" />
+          <textarea class="resposta-texto" rows="3" placeholder="Escreva seu comentário sobre esta avaliação..." maxlength="300"></textarea>
+          <button type="button" class="btn-enviar-resposta" data-key="${keyAttr}">Enviar comentário</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function carregarMeuComentario() {
+  if (!meuComentarioLista) return;
+  atualizarUsuarioAtual();
+
+  if (!telefoneValido(telefoneAtual)) {
+    meuComentarioLista.innerHTML = '<p class="vazio">Digite seu telefone para localizar seu comentário.</p>';
+    return;
+  }
+
+  try {
+    const usuarioKey = await gerarChaveTelefone(telefoneAtual);
+    const snapParticipante = await db.ref(`participantesPorTelefone/${promocaoAtual}/${usuarioKey}`).once("value");
+    const snapAvaliacao = await db.ref(`avaliacoesPorTelefone/${promocaoAtual}/${usuarioKey}`).once("value");
+    const dados = snapParticipante.exists() ? snapParticipante.val() : (snapAvaliacao.exists() ? snapAvaliacao.val() : null);
+
+    if (!dados || !dados.comentario) {
+      meuComentarioLista.innerHTML = '<p class="vazio">Seu comentário ainda não foi enviado.</p>';
+      return;
+    }
+
+    meuComentarioLista.innerHTML = cardMeuComentario(dados);
+  } catch (error) {
+    console.error(error);
+    meuComentarioLista.innerHTML = '<p class="vazio">Não foi possível carregar seu comentário agora.</p>';
+  }
+}
+
+function montarChaveUnicaAvaliacao(item) {
+  return item.avaliacaoId || item.usuarioKey || (String(item.telefoneOriginal || "") + "_" + String(item.timestamp || ""));
+}
+
+function desenharComentariosPublicos(mapa) {
+  if (!comentariosLista) return;
+  const dados = Object.values(mapa)
+    .filter((item) => item && item.comentario)
+    .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+
+  comentariosLista.innerHTML = "";
+  if (!dados.length) {
+    comentariosLista.innerHTML = '<p class="vazio">Nenhum comentário ainda.</p>';
+    return;
+  }
+
+  dados.forEach((item) => {
+    const avaliacaoKey = montarChaveUnicaAvaliacao(item);
+    const div = document.createElement("div");
+    div.innerHTML = cardComentarioPublico(item, avaliacaoKey);
+    comentariosLista.appendChild(div.firstElementChild);
+    carregarRespostasDaAvaliacao(avaliacaoKey);
+  });
+}
+
+function respostaPathKey(key) {
+  return String(key || "").replace(/[.#$\[\]/]/g, "_");
+}
+function respostaDomId(key) {
+  return respostaPathKey(key).replace(/[^A-Za-z0-9_-]/g, "_");
+}
+function possiveisChavesResposta(itemOuKey) {
+  const item = typeof itemOuKey === "object" ? itemOuKey : null;
+  const base = item ? [item.avaliacaoId, item.key, item.usuarioKey, montarChaveUnicaAvaliacao(item)] : [itemOuKey];
+  const out = [];
+  base.filter(Boolean).forEach((k) => {
+    const raw = String(k);
+    const safe = respostaPathKey(raw);
+    if (!out.includes(raw)) out.push(raw);
+    if (!out.includes(safe)) out.push(safe);
+  });
+  return out;
+}
+
+async function carregarRespostasDaAvaliacao(avaliacaoKey) {
+  const idSafe = respostaDomId(avaliacaoKey);
+  const el = document.getElementById("respostas-" + idSafe);
+  if (!el) return;
+
+  try {
+    const respostasMap = {};
+    for (const key of possiveisChavesResposta(avaliacaoKey)) {
+      const safeKey = respostaPathKey(key);
+      const snap = await db.ref("respostasAvaliacoes/" + safeKey).orderByChild("timestamp").limitToLast(80).once("value");
+      if (snap.exists()) {
+        snap.forEach((child) => {
+          const r = { id: child.key, ...child.val() };
+          respostasMap[child.key + "_" + (r.timestamp || "")] = r;
+        });
+      }
+    }
+    const respostas = Object.values(respostasMap).sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
+
+    if (!respostas.length) {
+      el.innerHTML = '<p class="vazio pequeno">Nenhum comentário nessa avaliação ainda.</p>';
+      return;
+    }
+
+    el.innerHTML = respostas.map((r) => `
+      <div class="resposta-item">
+        <strong>👤 ${escapeHtml(r.nome || "Cliente")}</strong>
+        <p>💬 ${escapeHtml(r.comentario || "")}</p>
+        <small>${escapeHtml(r.data || "")}</small>
+      </div>
+    `).join("");
+  } catch (error) {
+    console.error(error);
+    el.innerHTML = '<p class="vazio pequeno">Erro ao carregar comentários dessa avaliação.</p>';
+  }
+}
+
+async function enviarRespostaAvaliacao(avaliacaoKey, card) {
+  const nomeEl = card.querySelector(".resposta-nome");
+  const textoEl = card.querySelector(".resposta-texto");
+  const nome = nomeEl ? nomeEl.value.trim() : "";
+  const comentario = textoEl ? textoEl.value.trim() : "";
+
+  if (!nome) return alert("Digite seu nome para comentar.");
+  if (!comentario) return alert("Digite o comentário.");
+
+  const safeKey = respostaPathKey(avaliacaoKey);
+  const dados = {
+    avaliacaoKey: safeKey,
+    nome,
+    comentario,
+    data: new Date().toLocaleString("pt-BR"),
+    timestamp: Date.now()
+  };
+
+  try {
+    await db.ref("respostasAvaliacoes/" + safeKey).push(dados);
+    await db.ref("notificacoesAdm").push({
+      tipo: "resposta_avaliacao",
+      titulo: "Nova resposta em avaliação",
+      nome,
+      comentario,
+      promocaoId: promocaoAtual,
+      data: dados.data,
+      timestamp: dados.timestamp,
+      lida: false
+    });
+    if (textoEl) textoEl.value = "";
+    await carregarRespostasDaAvaliacao(avaliacaoKey);
+    alert("Comentário enviado com sucesso.");
+  } catch (error) {
+    console.error(error);
+    alert("Erro ao enviar comentário. Confira as regras do Firebase.");
+  }
+}
+
+if (comentariosLista) {
+  comentariosLista.addEventListener("click", async (e) => {
+    const toggle = e.target.closest(".btn-toggle-respostas");
+    if (toggle) {
+      const key = toggle.dataset.key;
+      const box = document.getElementById("responder-" + respostaDomId(key));
+      if (box) box.classList.toggle("hidden");
+      return;
+    }
+
+    const enviar = e.target.closest(".btn-enviar-resposta");
+    if (enviar) {
+      const key = enviar.dataset.key;
+      const card = enviar.closest(".publico-card");
+      enviar.disabled = true;
+      await enviarRespostaAvaliacao(key, card);
+      enviar.disabled = false;
+    }
+  });
+}
+
+async function carregarTodosComentariosPublicos() {
+  if (!comentariosLista) return;
+  comentariosLista.innerHTML = '<p class="vazio">Carregando todos os comentários...</p>';
+
+  const mapa = {};
+
+  // 1) Lista principal de avaliações.
+  const snapAvaliacoes = await db.ref("avaliacoes").orderByChild("timestamp").limitToLast(200).once("value");
+  if (snapAvaliacoes.exists()) {
+    snapAvaliacoes.forEach((child) => {
+      const item = { avaliacaoId: child.key, ...child.val() };
+      mapa[montarChaveUnicaAvaliacao(item)] = item;
+    });
+  }
+
+  // 2) Backup por telefone de todas as promoções. Assim aparece mesmo quando a lista principal foi apagada no ADM.
+  const snapPorTelefoneTodas = await db.ref("avaliacoesPorTelefone").once("value");
+  if (snapPorTelefoneTodas.exists()) {
+    snapPorTelefoneTodas.forEach((promoSnap) => {
+      promoSnap.forEach((child) => {
+        const item = { promocaoId: promoSnap.key, ...child.val() };
+        mapa[montarChaveUnicaAvaliacao(item)] = item;
+      });
+    });
+  }
+
+  // 3) Participantes bloqueados de todas as promoções. Mantém todos que já avaliaram visíveis na lista pública.
+  const snapParticipantesTodas = await db.ref("participantesPorTelefone").once("value");
+  if (snapParticipantesTodas.exists()) {
+    snapParticipantesTodas.forEach((promoSnap) => {
+      promoSnap.forEach((child) => {
+        const item = { promocaoId: promoSnap.key, ...child.val() };
+        mapa[montarChaveUnicaAvaliacao(item)] = item;
+      });
+    });
+  }
+
+  desenharComentariosPublicos(mapa);
+}
+
+db.ref("avaliacoes").on("value", carregarTodosComentariosPublicos);
+function ouvirPromocaoAtual() {
+  db.ref("config/promocaoAtual").on("value", async (snap) => {
+    const val = snap.exists() ? String(snap.val() || "").trim() : "";
+    if (val && val !== "promo_1" && val !== "carregando...") {
+      promocaoAtual = val;
+      if (promoAtualTexto) promoAtualTexto.textContent = promocaoAtual;
+      await atualizarContadoresVisitasPublicos();
+      await carregarTodosComentariosPublicos();
+      if (adminPainel && !adminPainel.classList.contains("hidden")) await atualizarPainelAdmin();
+    }
+  });
+}
+ouvirPromocaoAtual();
+
+// ================= ADM =================
+const adminModal = document.getElementById("adminModal");
+const btnAbrirAdmin = document.getElementById("btnAbrirAdmin");
+const btnFecharAdmin = document.getElementById("btnFecharAdmin");
+const btnEntrarAdmin = document.getElementById("btnEntrarAdmin");
+const loginAdmin = document.getElementById("loginAdmin");
+const senhaAdmin = document.getElementById("senhaAdmin");
+const adminErro = document.getElementById("adminErro");
+const adminLogin = document.getElementById("adminLogin");
+const adminPainel = document.getElementById("adminPainel");
+const promoAtualTexto = document.getElementById("promoAtualTexto");
+const totalGirosTexto = document.getElementById("totalGirosTexto");
+const totalAvaliacoesTexto = document.getElementById("totalAvaliacoesTexto");
+const btnNovaPromocao = document.getElementById("btnNovaPromocao");
+const btnLimparPromocao = document.getElementById("btnLimparPromocao");
+const btnVerAvaliacoes = document.getElementById("btnVerAvaliacoes");
+const btnExportarPDF = document.getElementById("btnExportarPDF");
+const btnExcluirComentarios = document.getElementById("btnExcluirComentarios");
+const btnVerGiros = document.getElementById("btnVerGiros");
+const btnVerNotificacoes = document.getElementById("btnVerNotificacoes");
+const btnRecuperarSenha = document.getElementById("btnRecuperarSenha");
+const btnSairAdmin = document.getElementById("btnSairAdmin");
+const adminUsuarioLogado = document.getElementById("adminUsuarioLogado");
+const adminAvaliacoes = document.getElementById("adminAvaliacoes");
+const adminGiros = document.getElementById("adminGiros");
+const adminNotificacoes = document.getElementById("adminNotificacoes");
+
+btnAbrirAdmin.addEventListener("click", () => adminModal.classList.remove("hidden"));
+btnFecharAdmin.addEventListener("click", () => adminModal.classList.add("hidden"));
+
+btnEntrarAdmin.addEventListener("click", async () => {
+  const email = loginAdmin.value.trim();
+  const senha = senhaAdmin.value.trim();
+  if (!email || !senha) {
+    adminErro.textContent = "Digite e-mail e senha do ADM.";
+    return;
+  }
+  try {
+    adminErro.textContent = "Entrando...";
+    await auth.signInWithEmailAndPassword(email, senha);
+    adminErro.textContent = "";
+  } catch (error) {
+    console.error(error);
+    adminErro.textContent = "Erro no login. Confira o e-mail/senha ou ative E-mail/Senha no Firebase Authentication.";
+  }
+});
+
+if (btnRecuperarSenha) {
+  btnRecuperarSenha.addEventListener("click", async () => {
+    const email = loginAdmin.value.trim();
+    if (!email) return alert("Digite o e-mail do ADM primeiro.");
+    try {
+      await auth.sendPasswordResetEmail(email);
+      alert("E-mail de recuperação enviado.");
+    } catch (error) {
+      console.error(error);
+      alert("Não foi possível enviar recuperação. Confira o e-mail.");
+    }
+  });
+}
+
+if (btnSairAdmin) {
+  btnSairAdmin.addEventListener("click", async () => {
+    await auth.signOut();
+  });
+}
+
+auth.onAuthStateChanged(async (user) => {
+  if (user) {
+    adminLogin.classList.add("hidden");
+    adminPainel.classList.remove("hidden");
+    if (adminUsuarioLogado) adminUsuarioLogado.textContent = user.email || "ADM conectado";
+    await atualizarPainelAdmin();
+    ativarNotificacoesTempoRealAdm();
+  } else {
+    adminLogin.classList.remove("hidden");
+    adminPainel.classList.add("hidden");
+    if (adminUsuarioLogado) adminUsuarioLogado.textContent = "";
+  }
+});
+
+async function atualizarPainelAdmin() {
+  if (!promocaoAtual || promocaoAtual === "promo_1") await carregarPromocaoAtual();
+  if (promoAtualTexto) promoAtualTexto.textContent = promocaoAtual || "carregando...";
+
+  let totalGiros = 0;
+  try {
+    const snapGirosPromo = await db.ref(`girosPorTelefone/${promocaoAtual}`).once("value");
+    totalGiros = snapGirosPromo.exists() ? snapGirosPromo.numChildren() : 0;
+  } catch (e) { console.warn(e); }
+  if (totalGirosTexto) totalGirosTexto.textContent = totalGiros;
+
+  await atualizarContadoresVisitasPublicos();
+  const listaAvaliacoesCompleta = await carregarTodasAvaliacoesAdmin();
+  if (totalAvaliacoesTexto) totalAvaliacoesTexto.textContent = listaAvaliacoesCompleta.length;
+}
+
+btnNovaPromocao.addEventListener("click", async () => {
+  if (!confirm("Criar uma nova promoção? Todos poderão girar novamente.")) return;
+  promocaoAtual = "promo_" + Date.now();
+  await db.ref("config/promocaoAtual").set(promocaoAtual);
+  await limparConfiguracaoDuplicada();
+  await db.ref("promocoes/" + promocaoAtual).set({ criadaEm: new Date().toLocaleString("pt-BR"), ativa: true });
+  jaGirou = false;
+  avaliacaoJaEnviada = false;
+  premioAtual = "";
+  desbloquearFormulario();
+  await verificarSeJaGirou();
+  await atualizarPainelAdmin();
+  alert("Nova promoção criada. Agora todos podem girar novamente.");
+});
+
+btnLimparPromocao.addEventListener("click", async () => {
+  if (!confirm("Limpar todos os giros da promoção atual? Isso libera todos para girar de novo.")) return;
+  await db.ref(`girosPorTelefone/${promocaoAtual}`).remove();
+  await db.ref(`participantesPorTelefone/${promocaoAtual}`).remove();
+  await db.ref(`avaliacoesPorTelefone/${promocaoAtual}`).remove();
+  jaGirou = false;
+  avaliacaoJaEnviada = false;
+  premioAtual = "";
+  desbloquearFormulario();
+  await verificarSeJaGirou();
+  await atualizarPainelAdmin();
+  alert("Giros da promoção atual limpos. Agora todos podem girar novamente.");
+});
+
+btnVerAvaliacoes.addEventListener("click", async () => {
+  adminAvaliacoes.classList.toggle("hidden");
+  if (!adminAvaliacoes.classList.contains("hidden")) {
+    await carregarAvaliacoesAdmin();
+  }
+});
+
+function chaveAdminItem(item) {
+  return item.avaliacaoId || item.key || ((item.promocaoId || "sem_promo") + "_" + (item.usuarioKey || item.telefoneOriginal || item.timestamp || Math.random()));
+}
+
+async function carregarTodasAvaliacoesAdmin() {
+  const mapa = {};
+
+  // Lista principal de avaliações.
+  const snapAvaliacoes = await db.ref("avaliacoes").orderByChild("timestamp").once("value");
+  if (snapAvaliacoes.exists()) {
+    snapAvaliacoes.forEach((child) => {
+      const item = { key: child.key, avaliacaoId: child.key, origem: "avaliacoes", ...child.val() };
+      mapa[chaveAdminItem(item)] = item;
+    });
+  }
+
+  // Todas as avaliações salvas por telefone, de todas as promoções.
+  const snapPorTelefoneTodas = await db.ref("avaliacoesPorTelefone").once("value");
+  if (snapPorTelefoneTodas.exists()) {
+    snapPorTelefoneTodas.forEach((promoSnap) => {
+      promoSnap.forEach((userSnap) => {
+        const item = { origem: "avaliacoesPorTelefone", promocaoId: promoSnap.key, ...userSnap.val() };
+        mapa[chaveAdminItem(item)] = { ...mapa[chaveAdminItem(item)], ...item };
+      });
+    });
+  }
+
+  // Participantes bloqueados, para não sumir cliente quando a avaliação principal tiver sido apagada.
+  const snapParticipantesTodas = await db.ref("participantesPorTelefone").once("value");
+  if (snapParticipantesTodas.exists()) {
+    snapParticipantesTodas.forEach((promoSnap) => {
+      promoSnap.forEach((userSnap) => {
+        const item = { origem: "participantesPorTelefone", promocaoId: promoSnap.key, ...userSnap.val() };
+        if (item.comentario) mapa[chaveAdminItem(item)] = { ...item, ...mapa[chaveAdminItem(item)] };
+      });
+    });
+  }
+
+  return Object.values(mapa)
+    .filter((item) => item && (item.nome || item.telefone || item.comentario))
+    .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+}
+
+async function carregarAvaliacoesAdmin() {
+  adminAvaliacoes.innerHTML = "<p>Carregando lista completa...</p>";
+  const lista = await carregarTodasAvaliacoesAdmin();
+
+  if (!lista.length) {
+    adminAvaliacoes.innerHTML = '<p class="vazio">Nenhuma avaliação salva.</p>';
+    return;
+  }
+
+  window.__listaAvaliacoesAdmin = lista;
+  adminAvaliacoes.innerHTML = `
+    <div class="admin-ajuda-pdf">✅ Marque 1 perfil abaixo e clique em <strong>COMPARTILHAR WHATSAPP</strong>.</div>
+  ` + lista.map((item, index) => {
+    const key = item.key || item.avaliacaoId || "";
+    return `
+      <div class="admin-item">
+        <label class="check-pdf">
+          <input type="checkbox" class="selecionar-pdf" value="${index}">
+          <span>Marcar para WhatsApp</span>
+        </label>
+        <strong>${escapeHtml(item.nome || "Sem nome")}</strong><br>
+        🆔 ${escapeHtml(item.usuarioId || "")}<br>
+        📞 ${escapeHtml(item.telefone || "")}<br>
+        ${renderizarEstrelas(item.nota)} | ${escapeHtml(item.categoria || "")}<br>
+        🎁 Desconto: ${escapeHtml(item.descontoSorteado || "")}<br>
+        💬 ${escapeHtml(item.comentario || "")}<br>
+        <small>${escapeHtml(item.data || "")} | ${escapeHtml(item.promocaoId || "")}</small>
+        ${key ? `<button class="btn-mini perigo-mini" onclick="excluirUmaAvaliacao('${escapeHtml(key)}', '${escapeHtml(item.promocaoId || "")}', '${escapeHtml(item.usuarioKey || "")}')">Excluir</button>` : ""}
+      </div>
+    `;
+  }).join("");
+}
+
+window.excluirUmaAvaliacao = async function(key, promocaoId, usuarioKey) {
+  if (!confirm("Excluir esta avaliação?")) return;
+  try {
+    const snap = await db.ref("avaliacoes/" + key).once("value");
+    const dados = snap.exists() ? snap.val() : {};
+    const promo = promocaoId || dados.promocaoId;
+    const userKey = usuarioKey || dados.usuarioKey;
+
+    if (key) await db.ref("avaliacoes/" + key).remove();
+    if (promo && userKey) {
+      await db.ref(`avaliacoesPorTelefone/${promo}/${userKey}`).remove();
+      await db.ref(`participantesPorTelefone/${promo}/${userKey}`).update({
+        comentario: null,
+        categoria: null,
+        nota: null,
+        avaliacaoId: null,
+        avaliacaoExcluida: true
+      });
+    }
+
+    // Mantém participantesPorTelefone e girosPorTelefone para o cliente continuar bloqueado.
+    // Assim ele não consegue enviar outra avaliação depois que o comentário foi excluído do painel.
+
+    await carregarAvaliacoesAdmin();
+    await carregarTodosComentariosPublicos();
+    await atualizarPainelAdmin();
+    alert("Avaliação excluída com sucesso.");
+  } catch (error) {
+    console.error(error);
+    alert("Erro ao excluir avaliação. Confira as regras do Firebase.");
+  }
+};
+
+btnExportarPDF.addEventListener("click", async () => {
+  let listaBase = window.__listaAvaliacoesAdmin || [];
+  if (!listaBase.length) {
+    listaBase = await carregarTodasAvaliacoesAdmin();
+    window.__listaAvaliacoesAdmin = listaBase;
+  }
+  if (!listaBase.length) return alert("Não tem avaliações para compartilhar.");
+
+  const marcados = Array.from(document.querySelectorAll(".selecionar-pdf:checked"))
+    .map((el) => listaBase[Number(el.value)])
+    .filter(Boolean);
+
+  if (!marcados.length) {
+    alert("Marque 1 perfil na lista para compartilhar no WhatsApp.");
+    if (adminAvaliacoes && adminAvaliacoes.classList.contains("hidden")) {
+      adminAvaliacoes.classList.remove("hidden");
+      await carregarAvaliacoesAdmin();
+    }
+    return;
+  }
+
+  if (marcados.length > 1) {
+    alert("Marque somente 1 perfil por vez para enviar no WhatsApp do cliente.");
+    return;
+  }
+
+  const a = marcados[0];
+  const telefoneOriginal = String(a.telefoneOriginal || a.telefone || "").replace(/\D/g, "");
+  if (!telefoneOriginal) {
+    alert("Este perfil não tem telefone salvo.");
+    return;
+  }
+
+  let telefoneComDDD = telefoneOriginal;
+  let telefoneSemDDD = telefoneOriginal;
+
+  if (telefoneOriginal.length >= 10) {
+    telefoneSemDDD = telefoneOriginal.slice(-9);
+  } else {
+    const ddd = prompt("Digite o DDD do cliente para enviar com DDD. Exemplo: 34\n\nSe quiser tentar sem DDD, deixe vazio e aperte OK.");
+    const dddLimpo = String(ddd || "").replace(/\D/g, "");
+    if (dddLimpo) telefoneComDDD = dddLimpo + telefoneOriginal;
+  }
+
+  const mensagem = [
+    "*Avaliação do Cliente - Passadoria*",
+    "",
+    `*Nome:* ${a.nome || "Sem nome"}`,
+    `*Telefone:* ${a.telefoneOriginal || a.telefone || ""}`,
+    `*ID:* ${a.usuarioId || ""}`,
+    `*Categoria:* ${a.categoria || ""}`,
+    `*Estrelas:* ${a.nota || ""}/5`,
+    `*Desconto:* ${a.descontoSorteado || ""}`,
+    `*Comentário:* ${a.comentario || ""}`,
+    `*Promoção:* ${a.promocaoId || ""}`,
+    `*Data:* ${a.data || ""}`
+  ].join("\n");
+
+  function abrirWhats(numero) {
+    let n = String(numero || "").replace(/\D/g, "");
+    if (!n) return alert("Número inválido.");
+    // Para número brasileiro com DDD, usa código do Brasil 55.
+    if (n.length >= 10 && !n.startsWith("55")) n = "55" + n;
+    const url = "https://wa.me/" + n + "?text=" + encodeURIComponent(mensagem);
+    window.open(url, "_blank");
+  }
+
+  if (telefoneOriginal.length >= 10) {
+    abrirWhats(telefoneComDDD);
+  } else {
+    const escolher = confirm("Quer tentar enviar COM DDD?\n\nOK = com DDD\nCancelar = sem DDD");
+    abrirWhats(escolher ? telefoneComDDD : telefoneSemDDD);
+  }
+});
+
+btnExcluirComentarios.addEventListener("click", async () => {
+  if (!confirm("Excluir TODOS os comentários/avaliações da lista? Os usuários que já participaram continuarão bloqueados nesta promoção.")) return;
+  await db.ref("avaliacoes").remove();
+  // Não apaga participantesPorTelefone nem girosPorTelefone. Isso mantém o bloqueio de quem já participou.
+  adminAvaliacoes.innerHTML = '<p class="vazio">Comentários apagados. Os participantes continuam bloqueados.</p>';
+  await carregarTodosComentariosPublicos();
+  await atualizarPainelAdmin();
+  alert("Comentários excluídos. Quem já participou continua bloqueado.");
+});
+
+
+async function carregarGirosAdmin() {
+  if (!adminGiros) return;
+  adminGiros.innerHTML = "<p>Carregando lista completa de giros...</p>";
+  const mapa = {};
+
+  function addGiro(item) {
+    if (!item || typeof item !== "object") return;
+    if (!item.descontoSorteado && !item.premioAtual && !item.premio && !item.desconto) return;
+    const chave = (item.promocaoId || item.promocaoAtual || item.promo || "sem_promo") + "_" +
+      (item.usuarioKey || item.key || item.telefoneOriginal || item.telefone || item.timestamp || Math.random());
+    mapa[chave] = { ...mapa[chave], ...item };
+  }
+
+  function varrerNo(obj, caminho = "") {
+    if (!obj || typeof obj !== "object") return;
+    const pareceGiro = obj.descontoSorteado || obj.premioAtual || obj.premio || obj.desconto;
+    if (pareceGiro) addGiro({ key: caminho.split("/").pop(), ...obj });
+    Object.keys(obj).forEach((k) => {
+      const v = obj[k];
+      if (v && typeof v === "object") varrerNo(v, caminho ? caminho + "/" + k : k);
+    });
+  }
+
+  // Lê todos os índices possíveis, inclusive estruturas antigas/aninhadas.
+  const caminhos = ["girosPorTelefone", "giros", "participantesPorTelefone", "avaliacoesPorTelefone"];
+  for (const caminho of caminhos) {
+    try {
+      const snap = await db.ref(caminho).once("value");
+      if (snap.exists()) varrerNo(snap.val(), caminho);
+    } catch (e) { console.warn("Erro ao ler", caminho, e); }
+  }
+
+  const lista = Object.values(mapa).sort((a,b) => Number(b.timestamp||0)-Number(a.timestamp||0));
+  if (!lista.length) {
+    adminGiros.innerHTML = '<p class="vazio">Nenhum giro salvo ainda.</p>';
+    return;
+  }
+
+  adminGiros.innerHTML = `<div class="admin-ajuda-pdf">🎯 Lista completa com todos os giros encontrados no Firebase.</div>` + lista.map((g) => `
+    <div class="admin-item">
+      <strong>${escapeHtml(g.nome || "Sem nome")}</strong><br>
+      🆔 ${escapeHtml(g.usuarioId || "")}
+      <br>📞 ${escapeHtml(g.telefone || "")}
+      <br>🎁 Desconto sorteado: <strong>${escapeHtml(g.descontoSorteado || g.premioAtual || g.premio || g.desconto || "")}</strong>
+      <br><small>${escapeHtml(g.data || "")} | ${escapeHtml(g.promocaoId || g.promocaoAtual || "")}</small>
+    </div>`).join("");
+}
+
+if (btnVerGiros) {
+  btnVerGiros.addEventListener("click", async () => {
+    if (!adminGiros) return;
+    adminGiros.classList.toggle("hidden");
+    if (!adminGiros.classList.contains("hidden")) await carregarGirosAdmin();
+  });
+}
+
+async function carregarNotificacoesAdm() {
+  if (!adminNotificacoes) return;
+  adminNotificacoes.innerHTML = "<p>Carregando notificações...</p>";
+  const mapa = {};
+
+  function addNotif(item) {
+    if (!item || typeof item !== "object") return;
+    const temConteudo = item.titulo || item.tipo || item.nome || item.descontoSorteado || item.comentario || item.data;
+    if (!temConteudo) return;
+    const chave = item.key || item.notificacaoId || (String(item.tipo || "notif") + "_" + String(item.timestamp || Math.random()) + "_" + String(item.usuarioKey || item.telefone || ""));
+    mapa[chave] = { ...mapa[chave], ...item };
+  }
+
+  function varrerNo(obj, caminho = "") {
+    if (!obj || typeof obj !== "object") return;
+    const pareceNotif = obj.titulo || obj.tipo || obj.descontoSorteado || obj.comentario || obj.nome;
+    if (pareceNotif) addNotif({ key: caminho.split("/").pop(), ...obj });
+    Object.keys(obj).forEach((k) => {
+      const v = obj[k];
+      if (v && typeof v === "object") varrerNo(v, caminho ? caminho + "/" + k : k);
+    });
+  }
+
+  // Lê todos os índices possíveis de notificação.
+  const caminhos = ["notificacoesAdm", "notificacoes", "notificacoesAdmin", "notificacoes_adm"];
+  for (const caminho of caminhos) {
+    try {
+      const snap = await db.ref(caminho).once("value");
+      if (snap.exists()) varrerNo(snap.val(), caminho);
+    } catch (e) { console.warn("Erro ao ler", caminho, e); }
+  }
+
+  // Garante que cada giro também apareça na lista de notificações.
+  try {
+    const snapGiros = await db.ref("giros").once("value");
+    if (snapGiros.exists()) {
+      snapGiros.forEach((child) => {
+        const g = child.val() || {};
+        addNotif({ key: "giro_" + child.key, tipo: "giro", titulo: "Novo giro realizado", ...g });
+      });
+    }
+  } catch(e) { console.warn(e); }
+
+  const lista = Object.values(mapa).sort((a,b) => Number(b.timestamp||0)-Number(a.timestamp||0));
+  if (!lista.length) {
+    adminNotificacoes.innerHTML = '<p class="vazio">Nenhuma notificação ainda.</p>';
+    return;
+  }
+
+  adminNotificacoes.innerHTML = `<div class="admin-ajuda-pdf">🔔 Lista completa com todas as notificações encontradas.</div>` + lista.map((n) => `
+    <div class="admin-item ${n.lida ? '' : 'notificacao-nova'}">
+      <strong>🔔 ${escapeHtml(n.titulo || n.tipo || "Notificação")}</strong><br>
+      👤 ${escapeHtml(n.nome || "Sem nome")}<br>
+      📞 ${escapeHtml(n.telefone || "")}<br>
+      🎁 ${escapeHtml(n.descontoSorteado || n.premioAtual || n.premio || n.desconto || "")}<br>
+      ${n.categoria ? `⭐ ${escapeHtml(n.nota || "")}/5 | ${escapeHtml(n.categoria || "")}<br>` : ""}
+      ${n.comentario ? `💬 ${escapeHtml(n.comentario || "")}<br>` : ""}
+      <small>${escapeHtml(n.data || "")} | ${escapeHtml(n.promocaoId || n.promocaoAtual || "")}</small>
+    </div>`).join("");
+
+  const updates = {};
+  lista.filter(n => n.key && !String(n.key).startsWith("giro_") && !n.lida).forEach(n => updates[`notificacoesAdm/${n.key}/lida`] = true);
+  if (Object.keys(updates).length) await db.ref().update(updates);
+}
+
+if (btnVerNotificacoes) {
+  btnVerNotificacoes.addEventListener("click", async () => {
+    if (!adminNotificacoes) return;
+    adminNotificacoes.classList.toggle("hidden");
+    if (!adminNotificacoes.classList.contains("hidden")) await carregarNotificacoesAdm();
+  });
+}
+
+let notificacaoAdmListenerAtivo = false;
+function ativarNotificacoesTempoRealAdm() {
+  if (notificacaoAdmListenerAtivo) return;
+  notificacaoAdmListenerAtivo = true;
+  const inicio = Date.now();
+  db.ref("notificacoesAdm").orderByChild("timestamp").startAt(inicio).on("child_added", (snap) => {
+    const n = snap.val() || {};
+    if (adminPainel && !adminPainel.classList.contains("hidden")) {
+      alert(`🔔 ${n.titulo || "Nova notificação"}\nCliente: ${n.nome || ""}\nDesconto: ${n.descontoSorteado || ""}`);
+    }
+    if (adminNotificacoes && !adminNotificacoes.classList.contains("hidden")) carregarNotificacoesAdm();
+  });
+}
+
+function renderizarEstrelas(nota) {
+  const total = 5;
+  const n = Math.max(0, Math.min(total, Number(nota) || 0));
+  return `<span class="stars-ok">${"★".repeat(n)}</span><span class="stars-off">${"☆".repeat(total - n)}</span>`;
+}
+
+function escapeHtml(texto) {
+  return String(texto || "").replace(/[&<>'"]/g, (c) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "'": "&#39;",
+    '"': "&quot;"
+  }[c]));
+}
+
+
+
+// Funções globais para os botões do HTML. Isso evita falha do onclick no celular.
+window.abrirListaGirosAdm = async function() {
+  if (!adminGiros) return;
+  if (adminNotificacoes) adminNotificacoes.classList.add("hidden");
+  if (adminAvaliacoes) adminAvaliacoes.classList.add("hidden");
+  adminGiros.classList.toggle("hidden");
+  if (!adminGiros.classList.contains("hidden")) await carregarGirosAdmin();
+};
+
+window.abrirNotificacoesAdm = async function() {
+  if (!adminNotificacoes) return;
+  if (adminGiros) adminGiros.classList.add("hidden");
+  if (adminAvaliacoes) adminAvaliacoes.classList.add("hidden");
+  adminNotificacoes.classList.toggle("hidden");
+  if (!adminNotificacoes.classList.contains("hidden")) await carregarNotificacoesAdm();
+};
+
+// Pega telefone direto do link, se você enviar assim: index.html?tel=34998607006
+(function preencherTelefonePeloLink() {
+  const params = new URLSearchParams(location.search);
+  const tel = params.get("tel") || params.get("telefone");
+  const telEl = document.getElementById("telefone");
+  if (tel && telEl) {
+    telEl.value = limparTelefone(tel);
+    atualizarUsuarioAtual();
+  }
+})();
+
+// Inicialização
+carregarPromocaoAtual()
+  .then(registrarEntrada)
+  .then(atualizarContadoresVisitasPublicos)
+  .then(async () => {
+    if (telefoneValido(telefoneAtual)) { await verificarSeJaGirou(); } else { atualizarBotaoEnviar(); }
+    await carregarMeuComentario();
+    if (adminPainel && !adminPainel.classList.contains("hidden")) await atualizarPainelAdmin();
+  })
+  .catch((e) => console.error(e));
+
+
+// ================= PWA =================
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./service-worker.js')
+      .then(() => console.log('PWA ativo: service worker registrado.'))
+      .catch((erro) => console.warn('Falha ao registrar PWA:', erro));
+  });
+}
