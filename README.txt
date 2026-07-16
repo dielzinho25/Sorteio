@@ -9,3 +9,16 @@ Atualizações:
 - PWA com ícones na raiz.
 
 Suba todos os arquivos na raiz do GitHub Pages.
+
+
+Atualização v13:
+- O botão GIRAR RODA só é liberado após preencher nome e sobrenome, telefone com DDD, categoria, estrelas e comentário.
+- Após o giro, a avaliação continua sendo enviada automaticamente.
+
+
+VERSÃO V15 - PROBABILIDADES DA RODA
+- Roda visual mantida de 0% até 20%.
+- A maioria dos resultados fica entre 0% e 10%.
+- Resultados acima de 10% são raros.
+- O prêmio de 20% tem 1% de chance.
+- Nenhuma outra função foi alterada.

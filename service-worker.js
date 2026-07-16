@@ -1,4 +1,4 @@
-const CACHE_NAME = 'roda-sorte-pwa-v12-config-unico';
+const CACHE_NAME = 'roda-sorte-pwa-v16-premios-raros';
 const APP_SHELL = [
   './',
   './index.html',

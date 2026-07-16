@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Roda da Sorte & Avaliações</title>
-  <link rel="manifest" href="./manifest.json?v=12" />
+  <link rel="manifest" href="./manifest.json?v=13" />
   <meta name="theme-color" content="#facc15" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-title" content="Roda Sorte" />
   <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png" />
   <link rel="apple-touch-icon" href="./icon-192.png" />
-  <link rel="stylesheet" href="style.css?v=12" />
+  <link rel="stylesheet" href="style.css?v=13" />
 </head>
 <body>
   <header class="topo">
@@ -30,7 +30,7 @@
         <div class="seta">▼</div>
         <canvas id="wheel" width="320" height="320"></canvas>
       </div>
-      <button id="btnGirar" class="btn principal">GIRAR RODA</button>
+      <button id="btnGirar" class="btn principal" disabled>PREENCHA TODOS OS DADOS</button>
       <div id="resultado" class="resultado">Seu prêmio aparecerá aqui.</div>
     </section>
 
@@ -89,6 +89,15 @@
     </section>
   </main>
 
+  <div id="perfilClienteModal" class="modal hidden">
+    <div class="modal-card perfil-cliente-card">
+      <button id="btnFecharPerfilCliente" class="fechar" type="button">×</button>
+      <h2>Perfil público do cliente</h2>
+      <p class="admin-info">Todos os registros públicos encontrados. Telefone e ID permanecem ocultos.</p>
+      <div id="perfilClienteConteudo"></div>
+    </div>
+  </div>
+
   <div id="adminModal" class="modal hidden">
     <div class="modal-card">
       <button id="btnFecharAdmin" class="fechar">×</button>
@@ -133,6 +142,6 @@
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="app.js?v=12"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>

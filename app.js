@@ -205,11 +205,25 @@ const ctx = canvas.getContext("2d");
 const btnGirar = document.getElementById("btnGirar");
 const resultado = document.getElementById("resultado");
 
-// Porcentagens distribuídas somente de 0% até 20%.
-const premios = ["0%", "2%", "4%", "6%", "8%", "10%", "12%", "14%", "16%", "18%", "20%"]; 
+// A roda continua mostrando descontos de 0% até 20%.
+// Os descontos acima de 10% são raros e o prêmio de 20% tem 1% de chance.
+const premios = ["0%", "2%", "4%", "6%", "8%", "10%", "12%", "14%", "16%", "18%", "20%"];
+const probabilidadesPremios = [25, 20, 17, 14, 12, 8, 1, 0.8, 0.6, 0.6, 1];
 const cores = ["#facc15", "#22c55e", "#3b82f6", "#ef4444", "#a855f7", "#fb923c", "#14b8a6", "#ec4899", "#84cc16", "#f97316", "#38bdf8"];
 let anguloAtual = 0;
 let girando = false;
+
+function sortearIndicePorProbabilidade() {
+  const totalPeso = probabilidadesPremios.reduce((soma, peso) => soma + peso, 0);
+  let sorteio = Math.random() * totalPeso;
+
+  for (let i = 0; i < probabilidadesPremios.length; i++) {
+    sorteio -= probabilidadesPremios[i];
+    if (sorteio < 0) return i;
+  }
+
+  return 0;
+}
 
 function desenharRoda() {
   const centro = canvas.width / 2;
@@ -257,8 +271,7 @@ async function verificarSeJaGirou() {
     premioAtual = "";
     resultado.textContent = "Digite seu telefone antes de girar.";
     desbloquearFormulario();
-    btnGirar.disabled = false;
-    btnGirar.textContent = "GIRAR RODA";
+    atualizarBotaoGirar();
     atualizarBotaoEnviar();
     return false;
   }
@@ -306,9 +319,8 @@ async function verificarSeJaGirou() {
     btnGirar.textContent = "GIRO JÁ UTILIZADO";
   } else {
     desbloquearFormulario();
-    resultado.textContent = "Seu prêmio aparecerá aqui.";
-    btnGirar.disabled = false;
-    btnGirar.textContent = "GIRAR RODA";
+    resultado.textContent = "Preencha todos os dados para liberar o giro.";
+    atualizarBotaoGirar();
   }
   atualizarBotaoEnviar();
   return jaGirou || avaliacaoJaEnviada;
@@ -318,7 +330,7 @@ async function verificarSeJaGirou() {
 const telefoneInput = document.getElementById("telefone");
 if (telefoneInput) {
   telefoneInput.addEventListener("blur", async () => { await verificarSeJaGirou(); await carregarMeuComentario(); });
-  telefoneInput.addEventListener("input", () => { atualizarUsuarioAtual(); atualizarBotaoEnviar(); });
+  telefoneInput.addEventListener("input", () => { atualizarUsuarioAtual(); atualizarBotaoGirar(); atualizarBotaoEnviar(); });
 }
 
 btnGirar.addEventListener("click", async () => {
@@ -326,8 +338,15 @@ btnGirar.addEventListener("click", async () => {
 
   atualizarUsuarioAtual();
   const nome = document.getElementById("nome").value.trim();
+  const categoria = document.getElementById("categoria").value;
+  const nota = Number(document.getElementById("nota").value);
+  const comentario = document.getElementById("comentario").value.trim();
+
   if (!nomeCompletoValido(nome)) return alert("Digite seu nome e sobrenome antes de girar.");
   if (!telefoneValido(telefoneAtual)) return alert("Digite um telefone válido com DDD antes de girar.");
+  if (!categoria) return alert("Selecione uma categoria antes de girar.");
+  if (!nota) return alert("Escolha a quantidade de estrelas antes de girar.");
+  if (!comentario) return alert("Escreva seu comentário antes de girar.");
 
   await verificarSeJaGirou();
   if (jaGirou) {
@@ -339,9 +358,13 @@ btnGirar.addEventListener("click", async () => {
   btnGirar.disabled = true;
   resultado.textContent = "Girando...";
 
-  const voltas = 6 + Math.random() * 4;
-  const destino = Math.random() * 2 * Math.PI;
-  const total = voltas * 2 * Math.PI + destino;
+  const indiceSorteado = sortearIndicePorProbabilidade();
+  const fatia = (2 * Math.PI) / premios.length;
+  const anguloAlvo = (1.5 * Math.PI - ((indiceSorteado + 0.5) * fatia) + 2 * Math.PI) % (2 * Math.PI);
+  const anguloNormalizado = ((anguloAtual % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+  const deslocamentoFinal = (anguloAlvo - anguloNormalizado + 2 * Math.PI) % (2 * Math.PI);
+  const voltas = 6 + Math.floor(Math.random() * 4);
+  const total = voltas * 2 * Math.PI + deslocamentoFinal;
   const inicio = anguloAtual;
   const duracao = 4200;
   const start = performance.now();
@@ -356,9 +379,9 @@ btnGirar.addEventListener("click", async () => {
       requestAnimationFrame(animar);
     } else {
       const anguloFinal = (anguloAtual % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
-      const fatia = (2 * Math.PI) / premios.length;
+      const fatiaFinal = (2 * Math.PI) / premios.length;
       const ponteiro = (1.5 * Math.PI - anguloFinal + 2 * Math.PI) % (2 * Math.PI);
-      const indice = Math.floor(ponteiro / fatia) % premios.length;
+      const indice = Math.floor(ponteiro / fatiaFinal) % premios.length;
       premioAtual = premios[indice];
 
       const telefoneProtegido = mascararTelefone(telefoneAtual);
@@ -408,8 +431,8 @@ btnGirar.addEventListener("click", async () => {
         .catch((error) => {
           console.error("Erro ao salvar giro:", error);
           girando = false;
-          btnGirar.disabled = false;
           resultado.textContent = "❌ Erro ao salvar o giro. Confira as regras do Firebase.";
+          atualizarBotaoGirar();
           atualizarBotaoEnviar();
         });
     }
@@ -427,6 +450,7 @@ estrelas.forEach((estrela) => {
     const nota = Number(estrela.dataset.star);
     notaInput.value = nota;
     estrelas.forEach((s) => s.classList.toggle("ativa", Number(s.dataset.star) <= nota));
+    atualizarBotaoGirar();
     atualizarBotaoEnviar();
   });
 });
@@ -439,6 +463,36 @@ const form = document.getElementById("formAvaliacao");
 const statusEl = document.getElementById("status");
 const btnEnviarAvaliacao = document.getElementById("btnEnviarAvaliacao");
 const camposObrigatorios = ["nome", "telefone", "categoria", "comentario"].map((id) => document.getElementById(id));
+
+function dadosAntesDoGiroValidos() {
+  const nome = document.getElementById("nome").value.trim();
+  const telefone = document.getElementById("telefone").value.trim();
+  const categoria = document.getElementById("categoria").value;
+  const nota = Number(notaInput.value);
+  const comentario = document.getElementById("comentario").value.trim();
+
+  return nomeCompletoValido(nome) && telefoneValido(telefone) && !!categoria && !!nota && !!comentario;
+}
+
+function atualizarBotaoGirar() {
+  if (!btnGirar || girando) return;
+
+  if (jaGirou || avaliacaoJaEnviada) {
+    btnGirar.disabled = true;
+    btnGirar.textContent = avaliacaoJaEnviada ? "BLOQUEADO" : "GIRO JÁ UTILIZADO";
+    return;
+  }
+
+  const liberar = dadosAntesDoGiroValidos();
+  btnGirar.disabled = !liberar;
+  btnGirar.textContent = liberar ? "GIRAR RODA" : "PREENCHA TODOS OS DADOS";
+
+  if (resultado && !premioAtual && !liberar) {
+    resultado.textContent = "Preencha nome, telefone, categoria, estrelas e comentário para liberar o giro.";
+  } else if (resultado && !premioAtual && liberar) {
+    resultado.textContent = "Tudo preenchido! Agora você pode girar a roda.";
+  }
+}
 
 function formularioCompletoValido() {
   const nome = document.getElementById("nome").value.trim();
@@ -463,8 +517,8 @@ function atualizarBotaoEnviar() {
 
 
 camposObrigatorios.forEach((campo) => {
-  if (campo) campo.addEventListener("input", atualizarBotaoEnviar);
-  if (campo) campo.addEventListener("change", atualizarBotaoEnviar);
+  if (campo) campo.addEventListener("input", () => { atualizarBotaoGirar(); atualizarBotaoEnviar(); });
+  if (campo) campo.addEventListener("change", () => { atualizarBotaoGirar(); atualizarBotaoEnviar(); });
 });
 
 form.addEventListener("submit", async (e) => {
@@ -563,7 +617,13 @@ function cardComentarioPublico(item, avaliacaoKey) {
   const idSafe = respostaDomId(keyRaw);
   return `
     <div class="comentario-card publico-card" data-avaliacao-key="${keyAttr}">
-      <h3>👤 ${escapeHtml(item.nome || "Cliente")}</h3>
+      <div class="cabecalho-avaliacao">
+        <button type="button" class="nome-cliente-clicavel" data-user-key="${escapeHtml(item.usuarioKey || "")}" data-nome="${escapeHtml(item.nome || "Cliente")}" title="Abrir perfil do cliente">👤 ${escapeHtml(item.nome || "Cliente")}</button>
+        <div class="reacoes-avaliacao" aria-label="Reações da avaliação">
+          <button type="button" class="btn-reacao btn-coracao" data-tipo="coracao" data-key="${keyAttr}" title="Dar coração">❤️ <span id="coracoes-${idSafe}">0</span></button>
+          <button type="button" class="btn-reacao btn-curtida" data-tipo="curtida" data-key="${keyAttr}" title="Curtir">👍 <span id="curtidas-${idSafe}">0</span></button>
+        </div>
+      </div>
       <p class="estrelas-salvas">${renderizarEstrelas(item.nota)}</p>
       <p>Categoria: <strong>${escapeHtml(item.categoria || "")}</strong></p>
       <p>💬 ${escapeHtml(item.comentario || "")}</p>
@@ -582,6 +642,85 @@ function cardComentarioPublico(item, avaliacaoKey) {
       </div>
     </div>
   `;
+}
+
+
+// ================= CURTIDAS E CORAÇÕES NAS AVALIAÇÕES =================
+const observadoresReacoes = new Map();
+
+function limparObservadoresReacoes() {
+  observadoresReacoes.forEach(({ ref, callback }) => ref.off("value", callback));
+  observadoresReacoes.clear();
+}
+
+function observarReacoesAvaliacao(avaliacaoKey) {
+  const safeKey = respostaPathKey(avaliacaoKey);
+  const idSafe = respostaDomId(avaliacaoKey);
+  const ref = db.ref("curtidasAvaliacoes/" + safeKey);
+  const callback = (snap) => {
+    const dados = snap.val() || {};
+    const curtidasEl = document.getElementById("curtidas-" + idSafe);
+    const coracoesEl = document.getElementById("coracoes-" + idSafe);
+    if (curtidasEl) curtidasEl.textContent = Number(dados.curtidas || 0);
+    if (coracoesEl) coracoesEl.textContent = Number(dados.coracoes || 0);
+  };
+  ref.on("value", callback);
+  observadoresReacoes.set(safeKey, { ref, callback });
+}
+
+async function obterTelefoneParaReacao() {
+  const campo = document.getElementById("telefone");
+  let telefone = campo ? limparTelefone(campo.value) : "";
+  if (!telefoneValido(telefone)) {
+    telefone = limparTelefone(prompt("Digite seu telefone com DDD para registrar sua reação:"));
+  }
+  if (!telefoneValido(telefone)) {
+    alert("Digite um telefone válido com DDD.");
+    return null;
+  }
+  return telefone;
+}
+
+async function registrarReacao(avaliacaoKey, tipo, botao) {
+  const telefone = await obterTelefoneParaReacao();
+  if (!telefone) return;
+
+  const usuarioKey = await gerarChaveTelefone(telefone);
+  const safeKey = respostaPathKey(avaliacaoKey);
+  const campoContador = tipo === "coracao" ? "coracoes" : "curtidas";
+  const campoUsuario = tipo === "coracao" ? "coracao" : "curtida";
+  const ref = db.ref("curtidasAvaliacoes/" + safeKey);
+
+  botao.disabled = true;
+  try {
+    const resultadoTx = await ref.transaction((atual) => {
+      atual = atual || { curtidas: 0, coracoes: 0, usuarios: {} };
+      atual.usuarios = atual.usuarios || {};
+      atual.usuarios[usuarioKey] = atual.usuarios[usuarioKey] || {};
+
+      if (atual.usuarios[usuarioKey][campoUsuario] === true) {
+        return;
+      }
+
+      atual.usuarios[usuarioKey][campoUsuario] = true;
+      atual[campoContador] = Number(atual[campoContador] || 0) + 1;
+      atual.atualizadoEm = Date.now();
+      return atual;
+    });
+
+    if (!resultadoTx.committed) {
+      alert(tipo === "coracao" ? "Você já deixou um coração nesta avaliação." : "Você já curtiu esta avaliação.");
+      return;
+    }
+
+    botao.classList.add("reagiu");
+    setTimeout(() => botao.classList.remove("reagiu"), 350);
+  } catch (error) {
+    console.error("Erro ao registrar reação:", error);
+    alert("Não foi possível registrar a reação. Confira a conexão e as regras do Firebase.");
+  } finally {
+    botao.disabled = false;
+  }
 }
 
 async function carregarMeuComentario() {
@@ -621,18 +760,22 @@ function desenharComentariosPublicos(mapa) {
     .filter((item) => item && item.comentario)
     .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
 
+  window.__comentariosPublicosMapa = mapa;
+  window.__comentariosPublicosLista = dados;
   comentariosLista.innerHTML = "";
   if (!dados.length) {
     comentariosLista.innerHTML = '<p class="vazio">Nenhum comentário ainda.</p>';
     return;
   }
 
+  limparObservadoresReacoes();
   dados.forEach((item) => {
     const avaliacaoKey = montarChaveUnicaAvaliacao(item);
     const div = document.createElement("div");
     div.innerHTML = cardComentarioPublico(item, avaliacaoKey);
     comentariosLista.appendChild(div.firstElementChild);
     carregarRespostasDaAvaliacao(avaliacaoKey);
+    observarReacoesAvaliacao(avaliacaoKey);
   });
 }
 
@@ -731,8 +874,121 @@ async function enviarRespostaAvaliacao(avaliacaoKey, card) {
   }
 }
 
+// ================= PERFIL PÚBLICO DO CLIENTE =================
+const perfilClienteModal = document.getElementById("perfilClienteModal");
+const perfilClienteConteudo = document.getElementById("perfilClienteConteudo");
+const btnFecharPerfilCliente = document.getElementById("btnFecharPerfilCliente");
+
+function normalizarNomePerfil(nome) {
+  return String(nome || "").trim().toLocaleLowerCase("pt-BR").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+async function buscarAvaliacoesDoCliente(usuarioKey, nome) {
+  const mapa = {};
+  const nomeNormalizado = normalizarNomePerfil(nome);
+  const adicionar = (item, keyExtra = "") => {
+    if (!item || !item.comentario) return;
+    const mesmoUsuario = usuarioKey && item.usuarioKey === usuarioKey;
+    const mesmoNome = !usuarioKey && normalizarNomePerfil(item.nome) === nomeNormalizado;
+    if (!mesmoUsuario && !mesmoNome) return;
+    const chave = montarChaveUnicaAvaliacao(item) || keyExtra || String(item.timestamp || Math.random());
+    mapa[chave] = { ...mapa[chave], ...item, avaliacaoKey: chave };
+  };
+
+  const listaMemoria = window.__comentariosPublicosLista || [];
+  listaMemoria.forEach((item) => adicionar(item));
+
+  const [snapAvaliacoes, snapPorTelefone, snapParticipantes] = await Promise.all([
+    db.ref("avaliacoes").once("value"),
+    db.ref("avaliacoesPorTelefone").once("value"),
+    db.ref("participantesPorTelefone").once("value")
+  ]);
+
+  if (snapAvaliacoes.exists()) snapAvaliacoes.forEach((c) => adicionar({ avaliacaoId: c.key, ...c.val() }, c.key));
+  if (snapPorTelefone.exists()) snapPorTelefone.forEach((promo) => promo.forEach((c) => adicionar({ promocaoId: promo.key, ...c.val() }, c.key)));
+  if (snapParticipantes.exists()) snapParticipantes.forEach((promo) => promo.forEach((c) => adicionar({ promocaoId: promo.key, ...c.val() }, c.key)));
+
+  return Object.values(mapa).sort((a,b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+}
+
+async function carregarResumoAvaliacaoPerfil(item) {
+  const key = montarChaveUnicaAvaliacao(item);
+  const safeKey = respostaPathKey(key);
+  const [snapReacoes, snapRespostas] = await Promise.all([
+    db.ref("curtidasAvaliacoes/" + safeKey).once("value"),
+    db.ref("respostasAvaliacoes/" + safeKey).once("value")
+  ]);
+  const reacoes = snapReacoes.val() || {};
+  const respostas = [];
+  if (snapRespostas.exists()) snapRespostas.forEach((c) => respostas.push({ id: c.key, ...c.val() }));
+  respostas.sort((a,b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
+  return { reacoes, respostas };
+}
+
+async function abrirPerfilCliente(usuarioKey, nome) {
+  if (!perfilClienteModal || !perfilClienteConteudo) return;
+  perfilClienteModal.classList.remove("hidden");
+  perfilClienteConteudo.innerHTML = '<p class="vazio">Carregando todos os registros públicos deste cliente...</p>';
+  try {
+    const avaliacoes = await buscarAvaliacoesDoCliente(usuarioKey, nome);
+    if (!avaliacoes.length) {
+      perfilClienteConteudo.innerHTML = '<p class="vazio">Nenhum registro público encontrado para este cliente.</p>';
+      return;
+    }
+    const detalhes = await Promise.all(avaliacoes.map(carregarResumoAvaliacaoPerfil));
+    const totalCurtidas = detalhes.reduce((s,d) => s + Number(d.reacoes.curtidas || 0), 0);
+    const totalCoracoes = detalhes.reduce((s,d) => s + Number(d.reacoes.coracoes || 0), 0);
+    const totalRespostas = detalhes.reduce((s,d) => s + d.respostas.length, 0);
+
+    perfilClienteConteudo.innerHTML = `
+      <div class="perfil-resumo">
+        <h3>👤 ${escapeHtml(nome || avaliacoes[0].nome || "Cliente")}</h3>
+        <p><strong>${avaliacoes.length}</strong> avaliação(ões) pública(s)</p>
+        <p>❤️ ${totalCoracoes} &nbsp; 👍 ${totalCurtidas} &nbsp; 💬 ${totalRespostas}</p>
+      </div>
+      <div class="perfil-avaliacoes-lista">
+        ${avaliacoes.map((item, i) => {
+          const d = detalhes[i];
+          return `
+            <article class="perfil-avaliacao-item">
+              <div class="perfil-avaliacao-topo">
+                <span>${renderizarEstrelas(item.nota)}</span>
+                <span>❤️ ${Number(d.reacoes.coracoes || 0)} &nbsp; 👍 ${Number(d.reacoes.curtidas || 0)}</span>
+              </div>
+              <p>Categoria: <strong>${escapeHtml(item.categoria || "")}</strong></p>
+              <p>🎁 Desconto: <strong>${escapeHtml(item.descontoSorteado || "")}</strong></p>
+              <p>💬 ${escapeHtml(item.comentario || "")}</p>
+              <small>${escapeHtml(item.data || "")} ${item.promocaoId ? "• " + escapeHtml(item.promocaoId) : ""}</small>
+              <div class="perfil-respostas">
+                <strong>Respostas (${d.respostas.length})</strong>
+                ${d.respostas.length ? d.respostas.map(r => `<div class="perfil-resposta-item"><b>👤 ${escapeHtml(r.nome || "Cliente")}</b><p>${escapeHtml(r.comentario || "")}</p><small>${escapeHtml(r.data || "")}</small></div>`).join("") : '<p class="vazio pequeno">Sem respostas nessa avaliação.</p>'}
+              </div>
+            </article>`;
+        }).join("")}
+      </div>`;
+  } catch (error) {
+    console.error("Erro ao abrir perfil público:", error);
+    perfilClienteConteudo.innerHTML = '<p class="vazio">Não foi possível carregar o perfil agora.</p>';
+  }
+}
+
+if (btnFecharPerfilCliente) btnFecharPerfilCliente.addEventListener("click", () => perfilClienteModal.classList.add("hidden"));
+if (perfilClienteModal) perfilClienteModal.addEventListener("click", (e) => { if (e.target === perfilClienteModal) perfilClienteModal.classList.add("hidden"); });
+
 if (comentariosLista) {
   comentariosLista.addEventListener("click", async (e) => {
+    const nomeClicavel = e.target.closest(".nome-cliente-clicavel");
+    if (nomeClicavel) {
+      await abrirPerfilCliente(nomeClicavel.dataset.userKey || "", nomeClicavel.dataset.nome || "Cliente");
+      return;
+    }
+
+    const reacao = e.target.closest(".btn-reacao");
+    if (reacao) {
+      await registrarReacao(reacao.dataset.key, reacao.dataset.tipo, reacao);
+      return;
+    }
+
     const toggle = e.target.closest(".btn-toggle-respostas");
     if (toggle) {
       const key = toggle.dataset.key;
@@ -1329,7 +1585,7 @@ carregarPromocaoAtual()
   .then(registrarEntrada)
   .then(atualizarContadoresVisitasPublicos)
   .then(async () => {
-    if (telefoneValido(telefoneAtual)) { await verificarSeJaGirou(); } else { atualizarBotaoEnviar(); }
+    if (telefoneValido(telefoneAtual)) { await verificarSeJaGirou(); } else { atualizarBotaoGirar(); atualizarBotaoEnviar(); }
     await carregarMeuComentario();
     if (adminPainel && !adminPainel.classList.contains("hidden")) await atualizarPainelAdmin();
   })
